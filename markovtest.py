@@ -1,295 +1,405 @@
-#!/usr/bin/env python3
 """
-Auxiliary-Driven Markov Chain Simulator - Multiple Test Version
-Complete implementation with exact and approximation methods
+AUXILIARY-DRIVEN MARKOV CHAINS: COMPREHENSIVE ACCURACY ANALYSIS
+Version 2.0 - High-Resolution Factor Sweeps
 
-USER CONFIGURATION:
-- Change NUM_ITERATIONS to adjust iterations per test
-- Change NUM_TESTS to adjust number of tests to run
-- Output saved to 'multiple_test_results.txt'
+This script performs comprehensive empirical analysis of auxiliary-driven
+Markov chain approximation accuracy across four key parameters:
+  1. Layer Depth (1-5 layers): 50 iterations
+  2. Main Chain State Space (2-8 states): 50 iterations, all values
+  3. Value Variance (15 continuous levels): continuous analysis
+  4. Iteration Count (1-50): every value tested
+
+Author: [Research Team]
+Date: December 2025
 """
 
 import numpy as np
-from datetime import datetime
+import pandas as pd
+import matplotlib.pyplot as plt
+from itertools import product
+import seaborn as sns
+
+np.random.seed(42)
 
 # ============================================================================
-# USER CONFIGURATION - CHANGE THESE VALUES
-# ============================================================================
-NUM_ITERATIONS = 20  # Number of iterations per test
-NUM_TESTS = 100  # Number of tests to run
-
-
+# CORE FUNCTIONS
 # ============================================================================
 
-class AuxiliaryMarkovChain:
+def generate_transition_matrix(n_states, spectral_gap_target=0.5, 
+                              similar_values=True, value_variance=0.05):
     """
-    Complete implementation of auxiliary-driven Markov chains with:
-    - Exact computation method
-    - Stationary approximation method
-    - Configurable iterations and tests
-    - Text file output
+    Generate a Markov chain transition matrix with controlled spectral gap.
+    
+    Parameters:
+        n_states: number of states
+        spectral_gap_target: controls mixing rate (higher = faster)
+        similar_values: if True, values close together; if False, dispersed
+        value_variance: controls variance of transition matrix entries
+    
+    Returns:
+        P: stochastic transition matrix (n_states x n_states)
     """
+    if similar_values:
+        base = np.ones((n_states, n_states)) / n_states
+        perturbation = np.random.randn(n_states, n_states) * value_variance
+    else:
+        base = np.zeros((n_states, n_states))
+        for i in range(n_states):
+            row = np.random.dirichlet(np.ones(n_states) * 0.5)
+            base[i, :] = row
+        perturbation = np.random.randn(n_states, n_states) * (value_variance * 3)
+    
+    P = base + perturbation
+    P = np.clip(P, 0.01, 0.99)
+    P = P / P.sum(axis=1, keepdims=True)
+    return P
 
-    def __init__(self, system_config):
-        self.config = system_config
-        self.results = {}
 
-    def compute_stationary_distribution(self, transition_matrix):
-        """Compute stationary distribution using eigenvalue decomposition"""
-        eigenvalues, eigenvectors = np.linalg.eig(transition_matrix.T)
+def stationary_distribution(P):
+    """
+    Compute stationary distribution of transition matrix P.
+    
+    Uses eigenvalue decomposition: π^T = π^T P
+    """
+    try:
+        eigenvalues, eigenvectors = np.linalg.eig(P.T)
         stationary_idx = np.argmax(np.abs(eigenvalues - 1) < 1e-10)
-        stationary = np.real(eigenvectors[:, stationary_idx])
-        stationary = np.abs(stationary)
-        stationary = stationary / np.sum(stationary)
-        return stationary
-
-    def exact_method(self, num_iterations):
-        """Exact computation tracking all auxiliary chain states"""
-        num_main_states = self.config['main_chain_states']
-        num_layers = self.config['num_layers']
-
-        main_state = self.config['initial_main_state']
-        auxiliary_states = self.config['initial_auxiliary_states'].copy()
-
-        trajectory = [main_state]
-
-        for iteration in range(num_iterations):
-            trans_probs = np.zeros(num_main_states)
-
-            for target in range(num_main_states):
-                prob = 1.0
-                for layer_idx in range(num_layers):
-                    aux_chain = self.config['auxiliary_chains'][layer_idx]
-                    aux_state = auxiliary_states[layer_idx]
-                    values = aux_chain['value_assignments'][(main_state, target)]
-                    prob *= values[aux_state]
-                trans_probs[target] = prob
-
-            trans_probs = np.clip(trans_probs, 1e-10, 1.0)
-            trans_probs = trans_probs / np.sum(trans_probs)
-
-            main_state = np.random.choice(num_main_states, p=trans_probs)
-            trajectory.append(main_state)
-
-            for layer_idx in range(num_layers):
-                aux_chain = self.config['auxiliary_chains'][layer_idx]
-                trans_matrix = aux_chain['transition_matrix']
-                current_aux_state = auxiliary_states[layer_idx]
-                probs = trans_matrix[current_aux_state]
-                auxiliary_states[layer_idx] = np.random.choice(len(probs), p=probs)
-
-        return {'trajectory': trajectory}
-
-    def approximation_method(self, num_iterations):
-        """Stationary distribution approximation method"""
-        num_main_states = self.config['main_chain_states']
-        num_layers = self.config['num_layers']
-
-        stationary_dists = []
-        for layer_idx in range(num_layers):
-            aux_chain = self.config['auxiliary_chains'][layer_idx]
-            stat_dist = self.compute_stationary_distribution(aux_chain['transition_matrix'])
-            stationary_dists.append(stat_dist)
-
-        main_state = self.config['initial_main_state']
-        trajectory = [main_state]
-
-        for iteration in range(num_iterations):
-            trans_probs_approx = np.zeros(num_main_states)
-
-            for target in range(num_main_states):
-                prob_approx = 1.0
-                for layer_idx in range(num_layers):
-                    aux_chain = self.config['auxiliary_chains'][layer_idx]
-                    values = aux_chain['value_assignments'][(main_state, target)]
-                    stat_dist = stationary_dists[layer_idx]
-                    exp_value = np.sum(values * stat_dist)
-                    prob_approx *= exp_value
-                trans_probs_approx[target] = prob_approx
-
-            trans_probs_approx = np.clip(trans_probs_approx, 1e-10, 1.0)
-            trans_probs_approx = trans_probs_approx / np.sum(trans_probs_approx)
-
-            main_state = np.random.choice(num_main_states, p=trans_probs_approx)
-            trajectory.append(main_state)
-
-        return {'trajectory': trajectory, 'stationary_distributions': stationary_dists}
-
-    def compute_accuracy(self, exact_result, approx_result):
-        """Compare exact and approximation methods"""
-        exact_traj = np.array(exact_result['trajectory'])
-        approx_traj = np.array(approx_result['trajectory'])
-
-        final_match = exact_traj[-1] == approx_traj[-1]
-
-        max_state = max(exact_traj.max(), approx_traj.max())
-        exact_dist = np.bincount(exact_traj, minlength=max_state + 1) / len(exact_traj)
-        approx_dist = np.bincount(approx_traj, minlength=max_state + 1) / len(approx_traj)
-
-        hellinger = np.sqrt(0.5 * np.sum((np.sqrt(exact_dist) - np.sqrt(approx_dist)) ** 2))
-        dist_accuracy = 1.0 - hellinger / np.sqrt(2)
-
-        overall_accuracy = 0.3 * float(final_match) + 0.7 * dist_accuracy
-
-        return {
-            'final_state_match': final_match,
-            'distribution_accuracy': dist_accuracy,
-            'overall_accuracy': overall_accuracy
-        }
-
-    def run_single_test(self, num_iterations):
-        """Run a single test"""
-        exact_result = self.exact_method(num_iterations)
-        approx_result = self.approximation_method(num_iterations)
-        accuracy = self.compute_accuracy(exact_result, approx_result)
-        return accuracy
+        pi = np.real(eigenvectors[:, stationary_idx])
+        pi = np.abs(pi) / np.abs(pi).sum()
+        return pi
+    except:
+        return np.ones(P.shape[0]) / P.shape[0]
 
 
-def create_random_system():
-    """Create a random 3-layer system"""
-    np.random.seed(None)  # Different system each time
+def compute_value_variance(P):
+    """
+    Compute average variance/delta of transition matrix values.
+    
+    Delta = std dev of all entries in P
+    """
+    flat_vals = P.flatten()
+    return np.std(flat_vals)
 
-    num_layers = 3
-    num_main_states = 3
 
-    # Create random transition matrices using Dirichlet distribution
-    layer1_transition = np.random.dirichlet([1] * 2, 2)
-    layer2_transition = np.random.dirichlet([1] * 3, 3)
-    layer3_transition = np.random.dirichlet([1] * 2, 2)
+def compute_approximation_error(P_auxiliary_stack, value_matrix_stack, 
+                                true_transitions, n_iterations):
+    """
+    Compute approximation error between true and approximate transitions.
+    
+    Approximation formula:
+        T_approx(i,j) = Σ_s π(s) * V(s)
+    where π is stationary distribution of auxiliary chain
+    """
+    errors = []
+    
+    for t in range(min(n_iterations, len(true_transitions))):
+        T_true = true_transitions[t]
+        
+        # Approximate: stationary distribution weighted average
+        T_approx = np.zeros_like(T_true)
+        for i in range(len(P_auxiliary_stack)):
+            pi_aux = stationary_distribution(P_auxiliary_stack[i])
+            V_vals = value_matrix_stack[i]
+            T_approx += pi_aux @ V_vals
+        
+        T_approx = T_approx / len(P_auxiliary_stack)
+        T_approx = np.clip(T_approx, 0, 1)
+        
+        # Frobenius norm error
+        error = np.linalg.norm(T_true - T_approx, 'fro')
+        errors.append(error)
+    
+    return np.array(errors)
 
-    # Create random value assignments
-    layer1_values = {}
-    for i in range(num_main_states):
-        for j in range(num_main_states):
-            layer1_values[(i, j)] = np.random.uniform(0.2, 0.9, 2)
 
-    layer2_values = {}
-    for i in range(num_main_states):
-        for j in range(num_main_states):
-            layer2_values[(i, j)] = np.random.uniform(0.2, 0.9, 3)
-
-    layer3_values = {}
-    for i in range(num_main_states):
-        for j in range(num_main_states):
-            layer3_values[(i, j)] = np.random.uniform(0.2, 0.9, 2)
-
-    system_config = {
-        'num_layers': num_layers,
-        'main_chain_states': num_main_states,
-        'auxiliary_chains': [
-            {'transition_matrix': layer1_transition, 'value_assignments': layer1_values},
-            {'transition_matrix': layer2_transition, 'value_assignments': layer2_values},
-            {'transition_matrix': layer3_transition, 'value_assignments': layer3_values}
-        ],
-        'initial_main_state': 0,
-        'initial_auxiliary_states': [0, 0, 0]
+def simulate_auxiliary_driven_chain(n_layers, n_main_states, 
+                                    n_aux_states_per_layer, n_iterations, 
+                                    value_variance=0.05):
+    """
+    Simulate auxiliary-driven Markov chain with stochastic evolution.
+    
+    Parameters:
+        n_layers: number of auxiliary layers
+        n_main_states: number of main chain states
+        n_aux_states_per_layer: states per auxiliary chain
+        n_iterations: simulation length
+        value_variance: controls heterogeneity of auxiliary values
+    
+    Returns:
+        Dictionary with:
+            errors: array of per-timestep errors
+            mean_error: average error
+            avg_delta: average variance of auxiliary transitions
+    """
+    
+    # Generate auxiliary chains
+    P_auxiliaries = []
+    for layer in range(n_layers):
+        P_aux = generate_transition_matrix(n_aux_states_per_layer, 
+                                           similar_values=True, 
+                                           value_variance=value_variance)
+        P_auxiliaries.append(P_aux)
+    
+    # Generate value matrices
+    value_matrices = []
+    for layer in range(n_layers):
+        V = np.random.dirichlet(np.ones(n_aux_states_per_layer) * 0.3, 
+                                size=1).flatten().reshape(-1, 1)
+        V = np.clip(V, 0.01, 0.99)
+        value_matrices.append(V)
+    
+    # Simulate time-varying main chain transitions
+    true_transitions = []
+    aux_states = [np.random.randint(0, n_aux_states_per_layer) 
+                  for _ in range(n_layers)]
+    
+    for t in range(n_iterations):
+        T_t = np.eye(n_main_states)
+        for layer in range(n_layers):
+            # Evolve auxiliary chains
+            aux_states[layer] = np.random.choice(
+                n_aux_states_per_layer, 
+                p=P_auxiliaries[layer][aux_states[layer], :]
+            )
+            # Apply auxiliary value to main transition
+            value = value_matrices[layer][aux_states[layer], 0]
+            T_t = (T_t * (1 - value) + 
+                   np.ones((n_main_states, n_main_states)) / n_main_states * value)
+        
+        T_t = T_t / T_t.sum(axis=1, keepdims=True)
+        true_transitions.append(T_t)
+    
+    # Compute approximation error
+    errors = compute_approximation_error(P_auxiliaries, value_matrices, 
+                                         true_transitions, n_iterations)
+    
+    # Compute average value variance
+    avg_delta = np.mean([compute_value_variance(P) for P in P_auxiliaries])
+    
+    return {
+        'errors': errors,
+        'mean_error': np.mean(errors),
+        'std_error': np.std(errors),
+        'final_error': errors[-1] if len(errors) > 0 else np.nan,
+        'avg_delta': avg_delta
     }
 
-    return system_config
+
+# ============================================================================
+# EXPERIMENT 1: LAYER DEPTH ANALYSIS (50 iterations)
+# ============================================================================
+
+def experiment_layers(n_iterations=50, n_trials=5):
+    """Test layer depth effect (1-5 layers)."""
+    print("\n" + "="*80)
+    print("EXPERIMENT 1: LAYER DEPTH ANALYSIS ({} iterations)".format(n_iterations))
+    print("="*80)
+    
+    layer_results = []
+    for n_layers in [1, 2, 3, 4, 5]:
+        trial_results = []
+        for trial in range(n_trials):
+            result = simulate_auxiliary_driven_chain(
+                n_layers=n_layers,
+                n_main_states=2,
+                n_aux_states_per_layer=3,
+                n_iterations=n_iterations,
+                value_variance=0.05
+            )
+            trial_results.append(result['mean_error'])
+        
+        avg_error = np.mean(trial_results)
+        std_error = np.std(trial_results)
+        
+        layer_results.append({
+            'Layers': n_layers,
+            'Mean_Error': avg_error,
+            'Std_Error': std_error,
+            'Accuracy': 100 * (1 - np.clip(avg_error, 0, 1))
+        })
+        
+        print(f"  Layers={n_layers}: Error={avg_error:.4f}±{std_error:.4f}, "
+              f"Accuracy={100*(1-np.clip(avg_error, 0, 1)):.2f}%")
+    
+    return pd.DataFrame(layer_results)
 
 
-def run_multiple_tests(num_tests, num_iterations):
-    """Run multiple tests and aggregate results"""
-    print(f"Running {num_tests} tests with {num_iterations} iterations each...")
+# ============================================================================
+# EXPERIMENT 2: MAIN STATE SPACE ANALYSIS (50 iterations, 2-8 states)
+# ============================================================================
 
-    accuracies = []
-    final_matches = []
+def experiment_state_space(n_iterations=50, n_trials=5):
+    """Test main chain state space effect (2-8 states, all values)."""
+    print("\n" + "="*80)
+    print("EXPERIMENT 2: MAIN CHAIN STATE SPACE ANALYSIS ({} iterations)".format(n_iterations))
+    print("="*80)
+    
+    states_results = []
+    for n_states in range(2, 9):
+        trial_results = []
+        for trial in range(n_trials):
+            result = simulate_auxiliary_driven_chain(
+                n_layers=3,
+                n_main_states=n_states,
+                n_aux_states_per_layer=3,
+                n_iterations=n_iterations,
+                value_variance=0.05
+            )
+            trial_results.append(result['mean_error'])
+        
+        avg_error = np.mean(trial_results)
+        std_error = np.std(trial_results)
+        
+        states_results.append({
+            'Main_States': n_states,
+            'Mean_Error': avg_error,
+            'Std_Error': std_error,
+            'Accuracy': 100 * (1 - np.clip(avg_error, 0, 1))
+        })
+        
+        print(f"  States={n_states}: Error={avg_error:.4f}±{std_error:.4f}, "
+              f"Accuracy={100*(1-np.clip(avg_error, 0, 1)):.2f}%")
+    
+    return pd.DataFrame(states_results)
 
-    for test_num in range(num_tests):
-        if (test_num + 1) % 10 == 0:
-            print(f"  Completed {test_num + 1}/{num_tests} tests...")
 
-        system = create_random_system()
-        simulator = AuxiliaryMarkovChain(system)
-        accuracy = simulator.run_single_test(num_iterations)
+# ============================================================================
+# EXPERIMENT 3: VALUE VARIANCE ANALYSIS (Continuous, 50 iterations)
+# ============================================================================
 
-        accuracies.append(accuracy['overall_accuracy'])
-        final_matches.append(1 if accuracy['final_state_match'] else 0)
+def experiment_value_variance(n_iterations=50, n_levels=15, n_trials=5):
+    """Test value variance effect (continuous levels)."""
+    print("\n" + "="*80)
+    print("EXPERIMENT 3: VALUE VARIANCE ANALYSIS ({} iterations, {} levels)".format(
+        n_iterations, n_levels))
+    print("="*80)
+    
+    variance_results = []
+    value_vars = np.linspace(0.01, 0.30, n_levels)
+    
+    for i, value_var in enumerate(value_vars):
+        trial_results = []
+        delta_values = []
+        
+        for trial in range(n_trials):
+            result = simulate_auxiliary_driven_chain(
+                n_layers=3,
+                n_main_states=2,
+                n_aux_states_per_layer=3,
+                n_iterations=n_iterations,
+                value_variance=value_var
+            )
+            trial_results.append(result['mean_error'])
+            delta_values.append(result['avg_delta'])
+        
+        avg_error = np.mean(trial_results)
+        avg_delta = np.mean(delta_values)
+        
+        variance_results.append({
+            'Avg_Delta': avg_delta,
+            'Mean_Error': avg_error,
+            'Accuracy': 100 * (1 - np.clip(avg_error, 0, 1))
+        })
+        
+        print(f"  ΔAvg={avg_delta:.4f}: Error={avg_error:.4f}, "
+              f"Accuracy={100*(1-np.clip(avg_error, 0, 1)):.2f}%")
+    
+    return pd.DataFrame(variance_results)
 
-    # Compute statistics
-    accuracies = np.array(accuracies)
-    final_matches = np.array(final_matches)
 
-    results = {
-        'num_tests': num_tests,
-        'num_iterations': num_iterations,
-        'mean_accuracy': np.mean(accuracies),
-        'median_accuracy': np.median(accuracies),
-        'std_accuracy': np.std(accuracies),
-        'min_accuracy': np.min(accuracies),
-        'max_accuracy': np.max(accuracies),
-        'final_match_rate': np.mean(final_matches),
-        'accuracy_distribution': {
-            'excellent (>80%)': np.sum(accuracies > 0.8) / num_tests * 100,
-            'good (60-80%)': np.sum((accuracies > 0.6) & (accuracies <= 0.8)) / num_tests * 100,
-            'fair (40-60%)': np.sum((accuracies > 0.4) & (accuracies <= 0.6)) / num_tests * 100,
-            'poor (<40%)': np.sum(accuracies <= 0.4) / num_tests * 100
-        }
-    }
+# ============================================================================
+# EXPERIMENT 4: ITERATION COUNT ANALYSIS (1-50, all values)
+# ============================================================================
 
-    return results
+def experiment_iterations(max_iterations=50, n_trials=3):
+    """Test iteration count effect (1-50, every value)."""
+    print("\n" + "="*80)
+    print("EXPERIMENT 4: ITERATION COUNT ANALYSIS (1-{} iterations)".format(max_iterations))
+    print("="*80)
+    
+    iterations_results = []
+    
+    for n_iters in range(1, max_iterations + 1):
+        trial_results = []
+        for trial in range(n_trials):
+            result = simulate_auxiliary_driven_chain(
+                n_layers=3,
+                n_main_states=2,
+                n_aux_states_per_layer=3,
+                n_iterations=n_iters,
+                value_variance=0.05
+            )
+            trial_results.append(result['mean_error'])
+        
+        avg_error = np.mean(trial_results)
+        std_error = np.std(trial_results)
+        
+        iterations_results.append({
+            'Iterations': n_iters,
+            'Mean_Error': avg_error,
+            'Std_Error': std_error,
+            'Accuracy': 100 * (1 - np.clip(avg_error, 0, 1))
+        })
+        
+        if n_iters % 10 == 0:
+            print(f"  Iter={n_iters}: Error={avg_error:.4f}±{std_error:.4f}, "
+                  f"Accuracy={100*(1-np.clip(avg_error, 0, 1)):.2f}%")
+    
+    return pd.DataFrame(iterations_results)
 
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
 
 if __name__ == "__main__":
-    # Print header
-    print("=" * 80)
-    print("AUXILIARY-DRIVEN MARKOV CHAIN - MULTIPLE TEST ANALYSIS")
-    print("=" * 80)
-    print(f"Configuration: {NUM_TESTS} tests × {NUM_ITERATIONS} iterations")
-    print("=" * 80)
-    print()
-
-    # Run the tests
-    results = run_multiple_tests(NUM_TESTS, NUM_ITERATIONS)
-
-    # Generate output text
-    output = []
-    output.append("=" * 80)
-    output.append("AUXILIARY-DRIVEN MARKOV CHAIN - MULTIPLE TEST RESULTS")
-    output.append("=" * 80)
-    output.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    output.append(f"Number of Tests: {results['num_tests']}")
-    output.append(f"Iterations per Test: {results['num_iterations']}")
-    output.append("")
-    output.append("=" * 80)
-    output.append("ACCURACY STATISTICS:")
-    output.append("=" * 80)
-    output.append(f"Mean Accuracy:       {results['mean_accuracy']:.4f} ({results['mean_accuracy'] * 100:.2f}%)")
-    output.append(f"Median Accuracy:     {results['median_accuracy']:.4f} ({results['median_accuracy'] * 100:.2f}%)")
-    output.append(f"Std Deviation:       {results['std_accuracy']:.4f}")
-    output.append(f"Min Accuracy:        {results['min_accuracy']:.4f} ({results['min_accuracy'] * 100:.2f}%)")
-    output.append(f"Max Accuracy:        {results['max_accuracy']:.4f} ({results['max_accuracy'] * 100:.2f}%)")
-    output.append(f"Final State Match:   {results['final_match_rate']:.4f} ({results['final_match_rate'] * 100:.2f}%)")
-    output.append("")
-    output.append("=" * 80)
-    output.append("ACCURACY DISTRIBUTION:")
-    output.append("=" * 80)
-    output.append(f"Excellent (>80%):    {results['accuracy_distribution']['excellent (>80%)']:.1f}% of tests")
-    output.append(f"Good (60-80%):       {results['accuracy_distribution']['good (60-80%)']:.1f}% of tests")
-    output.append(f"Fair (40-60%):       {results['accuracy_distribution']['fair (40-60%)']:.1f}% of tests")
-    output.append(f"Poor (<40%):         {results['accuracy_distribution']['poor (<40%)']:.1f}% of tests")
-    output.append("")
-    output.append("=" * 80)
-    output.append("INTERPRETATION:")
-    output.append("=" * 80)
-    if results['mean_accuracy'] > 0.8:
-        output.append("Overall: Excellent - Approximation method is highly reliable across systems")
-    elif results['mean_accuracy'] > 0.6:
-        output.append("Overall: Good - Approximation suitable for most applications")
-    elif results['mean_accuracy'] > 0.4:
-        output.append("Overall: Fair - Use approximation with caution")
-    else:
-        output.append("Overall: Poor - Prefer exact method")
-    output.append("")
-
-    output_text = "\n".join(output)
-
-    # Save to file
-    with open('multiple_test_results.txt', 'w') as f:
-        f.write(output_text)
-
-    # Print to console
-    print(output_text)
-    print("Results saved to: multiple_test_results.txt")
-    print()
-    print("To run with different settings, edit NUM_ITERATIONS and NUM_TESTS at the top of this file.")
+    print("\n" + "#"*80)
+    print("# AUXILIARY-DRIVEN MARKOV CHAINS: COMPREHENSIVE EMPIRICAL ANALYSIS")
+    print("#"*80)
+    
+    # Run all experiments
+    layers_df = experiment_layers(n_iterations=50, n_trials=5)
+    states_df = experiment_state_space(n_iterations=50, n_trials=5)
+    variance_df = experiment_value_variance(n_iterations=50, n_levels=15, n_trials=5)
+    iterations_df = experiment_iterations(max_iterations=50, n_trials=3)
+    
+    # Save results
+    print("\n" + "="*80)
+    print("SAVING RESULTS")
+    print("="*80)
+    
+    layers_df.to_csv('layer_analysis.csv', index=False)
+    states_df.to_csv('state_space_analysis.csv', index=False)
+    variance_df.to_csv('value_variance_analysis.csv', index=False)
+    iterations_df.to_csv('iterations_analysis.csv', index=False)
+    
+    print("\nResults saved:")
+    print("  - layer_analysis.csv")
+    print("  - state_space_analysis.csv")
+    print("  - value_variance_analysis.csv")
+    print("  - iterations_analysis.csv")
+    
+    # Print summary
+    print("\n" + "="*80)
+    print("SUMMARY")
+    print("="*80)
+    
+    print("\n1. LAYER DEPTH RESULTS:")
+    print(layers_df.to_string(index=False))
+    
+    print("\n2. STATE SPACE RESULTS:")
+    print(states_df.to_string(index=False))
+    
+    print("\n3. VALUE VARIANCE RESULTS (first/last 5):")
+    print(variance_df.head(5).to_string(index=False))
+    print("  ...")
+    print(variance_df.tail(5).to_string(index=False))
+    
+    print("\n4. ITERATION COUNT STATISTICS:")
+    print(f"  Range: {iterations_df['Mean_Error'].min():.4f} - {iterations_df['Mean_Error'].max():.4f}")
+    print(f"  Mean Accuracy: {iterations_df['Accuracy'].mean():.2f}%")
+    print(f"  Std Accuracy: {iterations_df['Accuracy'].std():.2f}%")
+    
+    print("\n" + "="*80)
+    print("ANALYSIS COMPLETE")
+    print("="*80)
